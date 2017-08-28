@@ -15,3 +15,4 @@
 * Get up and running to gain an insight into the deep learning library DL4J and its practical uses.
 * Design successful solutions with Extreme Learning machines
 * Train and Test neural networks to fit your data model
+
