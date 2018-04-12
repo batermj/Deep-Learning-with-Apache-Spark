@@ -3,15 +3,12 @@ package org.deeplearning4j.examples.convolution;
 import org.deeplearning4j.datasets.iterator.impl.MnistDataSetIterator;
 import org.deeplearning4j.eval.Evaluation;
 import org.deeplearning4j.nn.api.OptimizationAlgorithm;
-import org.deeplearning4j.nn.conf.LearningRatePolicy;
-import org.deeplearning4j.nn.conf.MultiLayerConfiguration;
-import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
-import org.deeplearning4j.nn.conf.Updater;
+import org.deeplearning4j.nn.conf.*;
+import org.deeplearning4j.nn.conf.distribution.Distribution;
+import org.deeplearning4j.nn.conf.distribution.GaussianDistribution;
+import org.deeplearning4j.nn.conf.distribution.NormalDistribution;
 import org.deeplearning4j.nn.conf.inputs.InputType;
-import org.deeplearning4j.nn.conf.layers.ConvolutionLayer;
-import org.deeplearning4j.nn.conf.layers.DenseLayer;
-import org.deeplearning4j.nn.conf.layers.OutputLayer;
-import org.deeplearning4j.nn.conf.layers.SubsamplingLayer;
+import org.deeplearning4j.nn.conf.layers.*;
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 import org.deeplearning4j.nn.weights.WeightInit;
 import org.deeplearning4j.optimize.listeners.ScoreIterationListener;
@@ -25,11 +22,29 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 import java.util.HashMap;
 
-/**
- * Created by agibsonccc on 9/16/15.
- */
 public class AlexnetMnistExample {
     private static final Logger log = LoggerFactory.getLogger(AlexnetMnistExample.class);
+
+    private static ConvolutionLayer convInit(String name, int in, int out, int[] kernel, int[] stride, int[] pad, double bias) {
+        return new ConvolutionLayer.Builder(kernel, stride, pad).name(name).nIn(in).nOut(out).biasInit(bias).build();
+    }
+
+    private static DenseLayer fullyConnected(String name, int out, double bias, double dropOut, Distribution dist) {
+        return new DenseLayer.Builder().name(name).nOut(out).biasInit(bias).dropOut(dropOut).dist(dist).build();
+    }
+
+    private static ConvolutionLayer conv3x3(String name, int out, double bias) {
+        return new ConvolutionLayer.Builder(new int[]{3,3}, new int[] {1,1}, new int[] {1,1}).name(name).nOut(out).biasInit(bias).build();
+    }
+
+    private static ConvolutionLayer conv5x5(String name, int out, int[] stride, int[] pad, double bias) {
+        return new ConvolutionLayer.Builder(new int[]{5,5}, stride, pad).name(name).nOut(out).biasInit(bias).build();
+    }
+
+    private static SubsamplingLayer maxPool(String name,  int[] kernel) {
+        return new SubsamplingLayer.Builder(kernel, new int[]{2,2}).name(name).build();
+    }
+
 
     public static void main(String[] args) throws Exception {
         int nChannels = 1; // Number of input channels
@@ -57,62 +72,52 @@ public class AlexnetMnistExample {
         lrSchedule.put(1000, 0.005);
         lrSchedule.put(3000, 0.001);
 
+        double nonZeroBias = 1;
+        double dropOut = 0;
+
         MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
                 .seed(seed)
-                .iterations(iterations) // Training iterations as above
-                .regularization(true).l2(0.0005)
-                /*
-                    Uncomment the following for learning decay and bias
-                 */
-                .learningRate(.01)//.biasLearningRate(0.02)
-                /*
-                    Alternatively, you can use a learning rate schedule.
-
-                    NOTE: this LR schedule defined here overrides the rate set in .learningRate(). Also,
-                    if you're using the Transfer Learning API, this same override will carry over to
-                    your new model configuration.
-                */
-                .learningRateDecayPolicy(LearningRatePolicy.Schedule)
-                .learningRateSchedule(lrSchedule)
-                /*
-                    Below is an example of using inverse policy rate decay for learning rate
-                */
-                //.learningRateDecayPolicy(LearningRatePolicy.Inverse)
-                //.lrPolicyDecayRate(0.001)
-                //.lrPolicyPower(0.75)
-                .weightInit(WeightInit.XAVIER)
+                .weightInit(WeightInit.DISTRIBUTION)///
+                //.weightInit(WeightInit.XAVIER)
+                .dist(new NormalDistribution(0.0, 0.01))
+                .activation(Activation.RELU)
+                .updater(Updater.NESTEROVS)
+                .iterations(iterations)
+                .gradientNormalization(GradientNormalization.RenormalizeL2PerLayer) // normalize to prevent vanishing or exploding gradients
                 .optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT)
-                .updater(Updater.NESTEROVS).momentum(0.9)
+                .learningRate(1e-3)//.biasLearningRate(0.02)//.learningRateSchedule(lrSchedule)
+                .biasLearningRate(1e-2*2)
+                ///.learningRateDecayPolicy(LearningRatePolicy.Schedule)
+                .learningRateDecayPolicy(LearningRatePolicy.Step)
+                .lrPolicyDecayRate(0.1)
+                .lrPolicySteps(100000)
+                .regularization(true)
+                .l2(5 * 1e-4) ///l2(0.0005)
+                .momentum(0.9)
+                .miniBatch(false)
                 .list()
-                .layer(0, new ConvolutionLayer.Builder(5, 5)
-                        //nIn and nOut specify depth. nIn here is the nChannels and nOut is the number of filters to be applied
-                        .nIn(nChannels)
-                        .stride(1, 1)
-                        .nOut(20)
-                        .activation(Activation.IDENTITY)
-                        .build())
-                .layer(1, new SubsamplingLayer.Builder(SubsamplingLayer.PoolingType.MAX)
-                        .kernelSize(2,2)
-                        .stride(2,2)
-                        .build())
-                .layer(2, new ConvolutionLayer.Builder(5, 5)
-                        //Note that nIn need not be specified in later layers
-                        .stride(1, 1)
-                        .nOut(50)
-                        .activation(Activation.IDENTITY)
-                        .build())
-                .layer(3, new SubsamplingLayer.Builder(SubsamplingLayer.PoolingType.MAX)
-                        .kernelSize(2,2)
-                        .stride(2,2)
-                        .build())
-                .layer(4, new DenseLayer.Builder().activation(Activation.RELU)
-                        .nOut(500).build())
-                .layer(5, new OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
+                .layer(0, convInit("cnn1", 1, 96, new int[]{2, 2}, new int[]{1, 1}, new int[]{0, 0}, 0))
+                .layer(1, new LocalResponseNormalization.Builder().name("lrn1").build())
+                .layer(2, maxPool("maxpool1", new int[]{3,3}))
+                .layer(3, conv5x5("cnn2", 256, new int[] {1,1}, new int[] {2,2}, nonZeroBias))
+                .layer(4, new LocalResponseNormalization.Builder().name("lrn2").build())
+                .layer(5, maxPool("maxpool2", new int[]{3,3}))
+                .layer(6,conv3x3("cnn3", 384, 0))
+                .layer(7,conv3x3("cnn4", 384, nonZeroBias))
+                .layer(8,conv3x3("cnn5", 256, nonZeroBias))
+                .layer(9, maxPool("maxpool3", new int[]{3,3}))
+                .layer(10, fullyConnected("ffn1", 4096, nonZeroBias, dropOut, new GaussianDistribution(0, 0.005)))
+                .layer(11, fullyConnected("ffn2", 4096, nonZeroBias, dropOut, new GaussianDistribution(0, 0.005)))
+                .layer(12, new OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
+                        .name("output")
                         .nOut(outputNum)
                         .activation(Activation.SOFTMAX)
                         .build())
-                .setInputType(InputType.convolutionalFlat(28,28,1)) //See note below
-                .backprop(true).pretrain(false).build();
+                .backprop(true)
+                .pretrain(false)
+                .setInputType(InputType.convolutionalFlat(28, 28,1))// .convolutional(batchSize, 1, 28, 28))
+                .build();
+
 
         /*
         Regarding the .setInputType(InputType.convolutionalFlat(28,28,1)) line: This does a few things.

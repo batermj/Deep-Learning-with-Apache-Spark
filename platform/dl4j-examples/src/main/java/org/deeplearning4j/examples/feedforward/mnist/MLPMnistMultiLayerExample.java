@@ -124,7 +124,7 @@ public class MLPMnistMultiLayerExample {
         }
 
         log.info(eval.stats());
-        log.info("****************Deep Learning with Apache Spark, Section 5, FFN Example finished********************");
+        log.info("****************Deep Learning with Apache Spark, Section 6, FFN Example finished********************");
 
     }
 
